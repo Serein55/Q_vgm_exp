@@ -1,0 +1,16 @@
+[project]
+name = "qvgm-reproduction"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Independent offline Q-VGM reproduction using external OpenPI and LIBERO assets"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["artifacts", "qvgm/models/rl_token.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]

@@ -1,0 +1,63 @@
+# Paths are relative to Q_vgm, not the invoking shell's working directory.
+paths:
+  python: ../RLinf/.venv-openpi-robotwin/bin/python
+  checkpoint: ../RLinf/checkpoints/RLinf-Pi05-LIBERO-SFT
+  norm_stats: ../RLinf/checkpoints/RLinf-Pi05-LIBERO-SFT/physical-intelligence/libero/norm_stats.json
+  tokenizer: /root/.cache/openpi/big_vision/paligemma_tokenizer.model
+  libero_root: ../RLinf/.venv-openpi-robotwin/lib/python3.11/site-packages/libero/libero
+  libero_assets: ../RLinf/assets/LIBERO-assets
+  artifacts: artifacts
+runtime:
+  device: cuda:0
+  mujoco_gl: egl
+  cpu_threads: 8
+  seed: 7
+model:
+  action_horizon: 10
+  action_dim: 32
+  discrete_state_input: false  # Match the released RLinf checkpoint.
+  denoising_steps: 10
+env:
+  suite: libero_spatial
+  task_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  action_chunk: 5
+  action_dim: 7
+  resolution: 256
+  settle_steps: 10
+  max_steps: 220
+evaluation:
+  episodes_per_task: 50
+# SFT baseline is supplied by the user; no baseline rerun is required.
+offline:
+  episodes_per_task: 15
+  temperature: 2.0  # Adopted from Spatial online settings; offline values unspecified.
+  flow_noise: 0.08
+  gamma: 0.99
+  rl_token:
+    steps: 10000
+    batch_size: 32
+    lr: 0.0001
+    layers: 2
+    dim: 2048
+    heads: 8
+    micro_batch: 8
+    checkpoint_interval: 500
+    mlp_ratio: 4.0
+  critic:
+    steps: 6000
+    batch_size: 64
+    heads: 10
+    widths: [512, 512, 256]
+    expectile: 0.8
+    q_lr: 0.0001
+    value_lr: 0.0001
+    target_ema: 0.005
+  actor:
+    late_steps: 5
+    ascent_steps: 3
+    ascent_step_size: 0.05
+    grad_clip: 3.5
+    lr: 0.000005  # Starting choice from online table; not an offline reported value.
+    batch_size: 8  # Engineering choice for the first offline run.
+    micro_batch: 1
+    steps: null  # Simulation offline update count is not specified in v5.

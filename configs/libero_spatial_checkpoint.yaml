@@ -1,0 +1,10 @@
+# Main reproduction profile: preserve the released SFT input/sampling contract.
+# Algorithm: paper v5. Unpublished offline budgets remain explicit assumptions.
+extends: libero_spatial.yaml
+offline:
+  rl_token:
+    validation_episode_fraction: 0.0
+  actor:
+    master_dtype: checkpoint
+    ascent_step_size: 0.05
+    lr: 0.000005  # Offline value unspecified; adopted from the online table.

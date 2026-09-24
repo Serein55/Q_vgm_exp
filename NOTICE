@@ -1,0 +1,4 @@
+qvgm/models/rl_token.py is vendored from
+RLinf/rlinf/models/embodiment/modules/rlt_token_transformer.py.
+Copyright 2026 The RLinf Authors. Licensed under Apache License 2.0.
+It is a local copy of the RLT encoder/decoder; Q_vgm does not import RLinf.

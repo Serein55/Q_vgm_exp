@@ -1,0 +1,13 @@
+# Literal reading of v5 III-A / IV-B / Table I, NOT a verified author config.
+# Changing conditioning/horizon changes the initial policy: use a NEW run/buffer.
+extends: libero_spatial.yaml
+model:
+  action_horizon: 5
+  discrete_state_input: true
+offline:
+  rl_token:
+    validation_episode_fraction: 0.0  # Use all fixed-buffer prefixes; split unspecified.
+  actor:
+    master_dtype: checkpoint  # Preserve released mixed bf16/fp32 parameter dtypes.
+    ascent_step_size: 0.05
+    lr: 0.000005  # Offline LR unspecified: engineering assumption remains explicit.
