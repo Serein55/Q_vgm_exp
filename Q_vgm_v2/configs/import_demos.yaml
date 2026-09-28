@@ -1,0 +1,10 @@
+extends: collect_sft.yaml
+# Paths resolve relative to Q_vgm through the shared config loader.
+paths:
+  demo_source: Q_vgm_v2/artifacts/expert_source/libero_spatial
+  demo_buffer: Q_vgm_v2/artifacts/v2_expert/buffer
+demo:
+  source_revision: f13aa24a3da8c43c7225569f28c562979fa0e35a
+  observation_source: rendered_pre_action_states
+  action_padding: repeat_last
+  reward_source: official_hdf5

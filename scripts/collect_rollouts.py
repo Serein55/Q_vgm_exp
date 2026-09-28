@@ -82,7 +82,7 @@ def main():
                 for _ in range(cfg["env"]["settle_steps"]):
                     obs, _, _, _ = env.step(DUMMY_ACTION)
                 observations, prefixes, transitions = [], [], []
-                steps, success = 0, False
+                steps, success, success_once = 0, False, False
                 inp = observation_for_policy(obs, task.language)
                 context = flow.encode_context([inp])
 
@@ -142,6 +142,7 @@ def main():
                         obs, _, done, _ = env.step(action.tolist())
                         steps += 1
                         success = bool(env.check_success())
+                        success_once = success_once or success
                         rewards.append(float(success))  # Sparse success reward.
                         terminated = bool(done or success)
                         if terminated or steps >= cfg["env"]["max_steps"]:
@@ -167,10 +168,14 @@ def main():
                         break
                 record = dict(
                     schema=2,
+                    source="rollout",
+                    policy_source="fewshot_sft",
                     task_id=task_id,
                     episode=episode,
                     seed=seed,
                     success=success,
+                    success_once=success_once,
+                    initial_state_index=episode,
                     observations=observations,
                     # Proprio tokenization can change prefix length within an episode.
                     prefixes=prefixes,
@@ -183,6 +188,8 @@ def main():
                     task_id=task_id,
                     episode=episode,
                     success=success,
+                    success_once=success_once,
+                    initial_state_index=episode,
                     steps=steps,
                     chunks=len(transitions),
                     seconds=time.monotonic() - start,
