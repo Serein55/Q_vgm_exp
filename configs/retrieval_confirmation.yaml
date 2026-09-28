@@ -1,0 +1,12 @@
+extends: controller_coverage.yaml
+paths:
+  retrieval_policy: artifacts/retrieval_confirmation/frozen_policy.pt
+recovery:
+  run: retrieval_confirmation
+  session_prefix: qvgm-retrieval-confirm-
+  fresh_first_episode: 45
+  episodes: 5
+  workers: 20
+  frozen_retrieval: true
+  retrieval_sha256: aeef474a64ac6d263a5604da35a20e98f73cb9806a2348fe04b8902bae076d75
+  test_episodes: [45, 46, 47, 48, 49]

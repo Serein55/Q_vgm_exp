@@ -15,7 +15,9 @@ from qvgm.training import buffer_signature, make_critic
 
 
 def main():
-    cfg = load_config(Path(__file__).resolve().parents[1] / "configs/libero_spatial_checkpoint.yaml")
+    cfg = load_config(
+        Path(__file__).resolve().parents[1] / "configs/libero_spatial_checkpoint.yaml"
+    )
     torch.set_num_threads(4)
     root = Path(cfg["paths"]["artifacts"]) / "spatial_paper_checkpoint"
     dest = root / "label_target_audit.json"

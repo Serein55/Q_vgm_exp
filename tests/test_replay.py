@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 
 from qvgm.data.replay_buffer import ReplayBuffer
-from qvgm.training import buffer_signature
+from qvgm.training import buffer_signature, proprio_features, proprio_stats
 
 
 class ReplayTests(unittest.TestCase):
@@ -57,6 +57,26 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(b.summary()["success_ratio"], 0.5)
             self.assertEqual(len(buffer_signature(b)), 64)
             self.assertEqual(b.observation(0, 0)["state"].shape, (8,))
+
+    def test_proprio_features_are_z_scored_over_buffer(self):
+        with tempfile.TemporaryDirectory() as d:
+            states = [torch.tensor([0.0, 2.0]), torch.tensor([2.0, 4.0]), torch.tensor([4.0, 6.0])]
+            record = dict(
+                schema=2,
+                task_id=0,
+                episode=0,
+                success=False,
+                observations=[{"observation/state": s} for s in states],
+                prefixes=[torch.randn(3, 4).bfloat16() for _ in states],
+                transitions=[dict(action=torch.zeros(5, 7), steps=5) for _ in states[:2]],
+            )
+            torch.save(record, Path(d) / "task00_episode000.pt")
+            buffer = ReplayBuffer(d)
+            stats = proprio_stats(buffer)
+            torch.testing.assert_close(stats["mean"], torch.tensor([2.0, 4.0]))
+            feats = proprio_features(buffer, [(0, 0), (0, 2)], stats)
+            self.assertEqual(feats.shape, (2, 2))
+            torch.testing.assert_close(feats[0], -feats[1])
 
 
 if __name__ == "__main__":

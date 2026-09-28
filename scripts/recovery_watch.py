@@ -12,7 +12,8 @@ from qvgm.config import load_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--config", default=str(Path(__file__).resolve().parents[1] / "configs/idea_recovery.yaml")
+    "--config",
+    default=str(Path(__file__).resolve().parents[1] / "configs/controller_coverage.yaml"),
 )
 parser.add_argument("--lanes", type=int, default=1)
 args = parser.parse_args()
@@ -61,25 +62,4 @@ while True:
     if all(completed):
         break
     time.sleep(30)
-write("fitting")
-with (root / "fit.log").open("w") as output:
-    result = subprocess.run(
-        [
-            cfg["paths"]["python"],
-            str(Path(__file__).with_name("recovery_fit.py")),
-            "--config",
-            config_path,
-        ],
-        stdout=output,
-        stderr=subprocess.STDOUT,
-    )
-if result.returncode:
-    write("failed", reason="critic fit failed; see fit.log")
-    sys.exit(result.returncode)
-report = json.loads((root / "candidate_report.json").read_text())
-write(
-    "awaiting_teacher_rollout_check"
-    if report["actor_gate"]["passed"]
-    else "stopped_at_teacher_gate",
-    gate=report["actor_gate"],
-)
+write("collection_complete", actor_started=False)

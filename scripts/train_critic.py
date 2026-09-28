@@ -4,7 +4,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qvgm.training import buffer_signature, log, make_critic, save_checkpoint, stage_args
+from qvgm.training import (
+    buffer_signature,
+    critic_state_dim,
+    log,
+    make_critic,
+    proprio_enabled,
+    proprio_features,
+    proprio_stats,
+    save_checkpoint,
+    stage_args,
+)
 
 
 def main():
@@ -43,9 +53,21 @@ def main():
         terminated=torch.tensor(done),
         success=torch.tensor(success),
     )
+    stats = proprio_stats(buffer) if proprio_enabled(cfg) else None
+    extra = 0 if stats is None else int(stats["mean"].numel())
+    if stats is not None:
+        pairs = list(buffer.transitions)
+        data["z"] = torch.cat([data["z"], proprio_features(buffer, pairs, stats)], -1)
+        data["next_z"] = torch.cat(
+            [
+                data["next_z"],
+                proprio_features(buffer, [(e, i + 1) for e, i in pairs], stats),
+            ],
+            -1,
+        )
     data = {k: v.to(device) for k, v in data.items()}
-    critic = make_critic(cfg).to(device)
-    value = Value(cfg["offline"]["rl_token"]["dim"], settings["widths"]).to(device)
+    critic = make_critic(cfg, extra).to(device)
+    value = Value(critic_state_dim(cfg, extra), settings["widths"]).to(device)
     trainer = IQL(critic, value, settings, cfg["offline"]["gamma"])
     dest = root / f"critic_{args.tag}.pt"
     start_step = 0
@@ -86,6 +108,7 @@ def main():
                     settings=settings,
                     config=cfg,
                     buffer_signature=signature,
+                    proprio_stats=stats,
                     cuda_rng=torch.cuda.get_rng_state(),
                 ),
             )

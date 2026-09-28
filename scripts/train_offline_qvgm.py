@@ -4,13 +4,22 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qvgm.training import buffer_signature, log, make_critic, save_checkpoint, stage_args
+from qvgm.training import (
+    buffer_signature,
+    log,
+    make_critic,
+    proprio_enabled,
+    proprio_features,
+    save_checkpoint,
+    stage_args,
+)
 
 
 def main():
     args, cfg, settings, root = stage_args("actor")
     # Reject resuming older checkpoints with rounded bf16 supervision targets.
     settings["loss_precision"] = "float32"
+    settings["bias_critic"] = bool(args.bias_critic)
     import copy
     import json
     import random
@@ -20,22 +29,36 @@ def main():
 
     from qvgm.algorithms.qvgm_loss import local_velocity_loss
     from qvgm.data.replay_buffer import ReplayBuffer
+    from qvgm.models.critic import ConstantDirectionQ
     from qvgm.models.pi05_adapter import Pi05Flow, load_sft_policy
 
     buffer = ReplayBuffer(root / "buffer")
     signature = buffer_signature(buffer)
-    diagnostics = json.loads((root / f"critic_diagnostics_{args.tag}.json").read_text())
-    if not diagnostics["q_gain"] > 0 or not diagnostics["grad_norm"] > 1e-10:
-        raise RuntimeError("Critic action-gradient gate failed")
     features = torch.load(root / f"features_{args.tag}.pt", weights_only=True)
-    ck = torch.load(root / f"critic_{args.tag}.pt", weights_only=True, map_location="cpu")
-    if features["buffer_signature"] != signature or ck["buffer_signature"] != signature:
-        raise ValueError("Buffer/critic/feature provenance mismatch")
+    if features["buffer_signature"] != signature:
+        raise ValueError("Buffer/feature provenance mismatch")
     device = cfg["runtime"]["device"]
-    critic = make_critic(cfg).to(device)
-    critic.load_state_dict(ck["critic"])
-    critic.eval().requires_grad_(False)
-    del ck
+    stats = None
+    if args.bias_critic:
+        direction = json.loads((root / f"guidance_direction_{args.tag}.json").read_text())
+        critic = ConstantDirectionQ(
+            direction["global_direction"], cfg["env"]["action_chunk"], cfg["env"]["action_dim"]
+        )
+    else:
+        diagnostics = json.loads((root / f"critic_diagnostics_{args.tag}.json").read_text())
+        if not diagnostics["q_gain"] > 0 or not diagnostics["grad_norm"] > 1e-10:
+            raise RuntimeError("Critic action-gradient gate failed")
+        ck = torch.load(root / f"critic_{args.tag}.pt", weights_only=True, map_location="cpu")
+        if ck["buffer_signature"] != signature:
+            raise ValueError("Critic provenance mismatch")
+        stats = ck.get("proprio_stats")
+        if proprio_enabled(cfg) != (stats is not None):
+            raise ValueError("critic.proprio does not match the critic checkpoint")
+        extra = 0 if stats is None else int(stats["mean"].numel())
+        critic = make_critic(cfg, extra)
+        critic.load_state_dict(ck["critic"])
+        del ck
+    critic = critic.to(device).eval().requires_grad_(False)
     policy = load_sft_policy(cfg)
     actor = Pi05Flow(policy, cfg)
     # Share frozen VLM; only duplicate the small action expert and projections.
@@ -95,6 +118,8 @@ def main():
             ids = samples[offset : offset + micro]
             context = actor.encode_context([buffer.observation(e, i) for e, i in ids])
             z = torch.stack([features["z"][e][i] for e, i in ids]).to(device)
+            if stats is not None:
+                z = torch.cat([z, proprio_features(buffer, ids, stats).to(device)], -1)
             _, trajectory = actor.sample_with_intermediates(context)
             for tau, x in trajectory[K - M :]:
                 loss, metrics = local_velocity_loss(

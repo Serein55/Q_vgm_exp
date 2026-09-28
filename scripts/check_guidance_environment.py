@@ -84,15 +84,20 @@ def main():
     h, d = cfg["env"]["action_chunk"], cfg["env"]["action_dim"]
     horizon, dim = cfg["model"]["action_horizon"], cfg["model"]["action_dim"]
     records = []
+
     def guide(context, normalized, alpha):
-        with torch.no_grad(), torch.autocast(
-            device_type="cuda", dtype=torch.bfloat16, enabled=args.encoder_bf16
+        with (
+            torch.no_grad(),
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=args.encoder_bf16),
         ):
             prefix = context["prefix"][:, context["pad"][0]].float()
             z = encoder(prefix).flatten(1).float()
         improved, metrics = improve_actions(
-            critic.mean, z, normalized[:, :h, :d],
-            steps=cfg["offline"]["actor"]["ascent_steps"], alpha=alpha
+            critic.mean,
+            z,
+            normalized[:, :h, :d],
+            steps=cfg["offline"]["actor"]["ascent_steps"],
+            alpha=alpha,
         )
         normalized[:, :h, :d] = improved
         return metrics

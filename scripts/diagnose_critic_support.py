@@ -40,33 +40,48 @@ def main():
     report = {"buffer_signature": signature, "tasks": {}}
     actor = cfg["offline"]["actor"]
     # Fixed diagnostic constants, not training hyperparameters.
-    report["settings"] = dict(seed=cfg["runtime"]["seed"], max_samples_per_task=128,
-                              quantiles=[0.01, 0.99], ascent_steps=actor["ascent_steps"],
-                              ascent_step_size=actor["ascent_step_size"])
+    report["settings"] = dict(
+        seed=cfg["runtime"]["seed"],
+        max_samples_per_task=128,
+        quantiles=[0.01, 0.99],
+        ascent_steps=actor["ascent_steps"],
+        ascent_step_size=actor["ascent_step_size"],
+    )
     for task in range(10):
-        pairs = [(e, i) for e, i in buffer.transitions
-                 if buffer.files[e].name.startswith(f"task{task:02d}_")]
-        actions = torch.stack([buffer.episodes[e]["transitions"][i]["action"]
-                               for e, i in pairs]).to(device)
+        pairs = [
+            (e, i)
+            for e, i in buffer.transitions
+            if buffer.files[e].name.startswith(f"task{task:02d}_")
+        ]
+        actions = torch.stack(
+            [buffer.episodes[e]["transitions"][i]["action"] for e, i in pairs]
+        ).to(device)
         population = actions.flatten(0, 1)
         low, high = torch.quantile(population, torch.tensor([0.01, 0.99], device=device), dim=0)
         std = population.std(0)
         ids = torch.randperm(len(pairs))[:128].tolist()
         z = torch.stack([features["z"][pairs[k][0]][pairs[k][1]] for k in ids]).to(device)
         a = actions[ids]
-        improved, metrics = improve_actions(critic.mean, z, a, steps=actor["ascent_steps"],
-                                            alpha=actor["ascent_step_size"])
+        improved, metrics = improve_actions(
+            critic.mean, z, a, steps=actor["ascent_steps"], alpha=actor["ascent_step_size"]
+        )
         delta = improved - a
+
         def outside(x):
             return ((x < low) | (x > high)).float().mean((0, 1)).tolist()
+
         report["tasks"][str(task)] = dict(
-            transitions=len(pairs), sampled_transitions=len(ids),
+            transitions=len(pairs),
+            sampled_transitions=len(ids),
             normalized_action_std=std.tolist(),
             mean_guidance_per_dimension=delta.mean((0, 1)).tolist(),
-            rms_guidance_over_marginal_std=(delta.square().mean((0, 1)).sqrt()
-                                          / std.clamp_min(1e-8)).tolist(),
+            rms_guidance_over_marginal_std=(
+                delta.square().mean((0, 1)).sqrt() / std.clamp_min(1e-8)
+            ).tolist(),
             outside_1_99_percentile_before=outside(a),
-            outside_1_99_percentile_after=outside(improved), **metrics)
+            outside_1_99_percentile_after=outside(improved),
+            **metrics,
+        )
     # Double precision limits cancellation when checking the derivative itself.
     critic.double()
     a = a[:16].double().requires_grad_(True)
@@ -75,14 +90,20 @@ def main():
     direction = torch.nn.functional.normalize(grad.flatten(1), dim=1).reshape_as(a)
     eps = 1e-4
     with torch.no_grad():
-        finite_difference = (critic.mean(z, a + eps * direction)
-                             - critic.mean(z, a - eps * direction)) / (2 * eps)
+        finite_difference = (
+            critic.mean(z, a + eps * direction) - critic.mean(z, a - eps * direction)
+        ) / (2 * eps)
     analytic = (grad * direction).sum((1, 2))
     report["finite_difference"] = dict(
-        task=9, samples=len(a), dtype="float64", epsilon=eps,
+        task=9,
+        samples=len(a),
+        dtype="float64",
+        epsilon=eps,
         max_absolute_error=float((finite_difference - analytic).abs().max()),
-        max_relative_error=float(((finite_difference - analytic).abs()
-                                  / analytic.abs().clamp_min(1e-12)).max()))
+        max_relative_error=float(
+            ((finite_difference - analytic).abs() / analytic.abs().clamp_min(1e-12)).max()
+        ),
+    )
     report["limitations"] = (
         "Marginal per-task ranges pooled over chunk positions are not conditional support. "
         "These checks use recorded actions, not the actor's reference endpoints. "

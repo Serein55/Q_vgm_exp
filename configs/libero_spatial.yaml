@@ -52,6 +52,8 @@ offline:
     q_lr: 0.0001
     value_lr: 0.0001
     target_ema: 0.005
+    value_target: min  # Head aggregation for the expectile target; unspecified in v5.
+    proprio: false  # Critic-only proprioception; policy conditioning stays stateless.
   actor:
     late_steps: 5
     ascent_steps: 3

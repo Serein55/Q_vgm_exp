@@ -1,0 +1,6 @@
+# Ablation arm: critic state = z_rl || z-scored proprioception (8 dims).
+# The released checkpoint stays stateless, so proprio enters the critic only.
+extends: ../libero_spatial.yaml
+offline:
+  critic:
+    proprio: true

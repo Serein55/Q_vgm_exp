@@ -2,10 +2,11 @@ import unittest
 
 import torch
 
-from qvgm.algorithms.iql import chunk_target, expectile_loss
+from qvgm.algorithms.iql import IQL, chunk_target, expectile_loss
 from qvgm.algorithms.q_guidance import improve_actions
 from qvgm.algorithms.qvgm_loss import local_velocity_loss
-from qvgm.models.critic import ChunkCritic
+from qvgm.models.critic import ChunkCritic, ConstantDirectionQ, Value
+from qvgm.training import critic_state_dim, make_critic, proprio_enabled
 
 
 class AlgorithmTests(unittest.TestCase):
@@ -109,6 +110,48 @@ class AlgorithmTests(unittest.TestCase):
         self.assertIsNone(ref.weight.grad)
         self.assertIsNone(x.grad)
         self.assertLess(actor.weight.grad.item(), 0)
+
+    def test_value_target_aggregation_is_switchable(self):
+        critic = ChunkCritic(2, 1, 1, heads=2, widths=(4,))
+        value = Value(2, (4,))
+        base = dict(q_lr=1e-3, value_lr=1e-3, target_ema=0.005, expectile=0.8)
+        q = torch.tensor([[1.0, 3.0]])
+        self.assertEqual(IQL(critic, value, base, 0.99).head_target(q).item(), 1.0)
+        trainer = IQL(critic, value, dict(base, value_target="mean"), 0.99)
+        self.assertEqual(trainer.head_target(q).item(), 2.0)
+        with self.assertRaises(ValueError):
+            IQL(critic, value, dict(base, value_target="median"), 0.99)
+
+    def test_critic_proprio_widens_state_only(self):
+        cfg = {
+            "offline": {
+                "critic": {"heads": 2, "widths": [8], "proprio": True},
+                "rl_token": {"dim": 16},
+            },
+            "env": {"action_chunk": 5, "action_dim": 7},
+        }
+        self.assertTrue(proprio_enabled(cfg))
+        self.assertEqual(critic_state_dim(cfg, 8), 24)
+        critic = make_critic(cfg, 8)
+        # 24-dim state plus the flattened 5x7 executed chunk.
+        self.assertEqual(critic.heads[0].layers[0].in_features, 24 + 35)
+        cfg["offline"]["critic"]["proprio"] = False
+        self.assertFalse(proprio_enabled(cfg))
+        self.assertEqual(critic_state_dim(cfg), 16)
+
+    def test_constant_direction_q_displacement_is_state_independent(self):
+        direction = torch.tensor([2.0, 0.0, 0.0, 0.0, -1.0, 0.0])
+        q = ConstantDirectionQ(direction, 2, 3)
+        improved, metrics = improve_actions(
+            q.mean, torch.randn(4, 5), torch.zeros(4, 2, 3), steps=3, alpha=0.05
+        )
+        expected = 0.15 * direction.reshape(2, 3) / direction.norm()
+        for row in improved:
+            torch.testing.assert_close(row, expected, atol=1e-6, rtol=0)
+        self.assertAlmostEqual(metrics["displacement"], 0.15, places=5)
+        self.assertEqual(metrics["accept_rate"], 1.0)
+        with self.assertRaises(ValueError):
+            ConstantDirectionQ(direction[:4], 2, 3)
 
 
 if __name__ == "__main__":

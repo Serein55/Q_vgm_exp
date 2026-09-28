@@ -10,6 +10,8 @@ import torch
 
 from qvgm.config import load_config, setup_runtime
 
+PROPRIO_KEY = "observation/state"
+
 
 def stage_args(stage):
     p = argparse.ArgumentParser()
@@ -23,6 +25,11 @@ def stage_args(stage):
     if stage == "actor":
         p.add_argument("--ascent-step-size", type=float)
         p.add_argument("--lr", type=float)
+        p.add_argument(
+            "--bias-critic",
+            action="store_true",
+            help="Replace the learned critic with q(z,a)=a.m using the measured global direction",
+        )
     args = p.parse_args()
     cfg = load_config(args.config)
     setup_runtime(cfg)
@@ -85,14 +92,45 @@ def make_autoencoder(config, seq_len=1024):
     )
 
 
-def make_critic(cfg):
+def make_critic(cfg, extra_state_dim=0):
     from qvgm.models.critic import ChunkCritic
 
     c = cfg["offline"]["critic"]
     return ChunkCritic(
-        cfg["offline"]["rl_token"]["dim"],
+        critic_state_dim(cfg, extra_state_dim),
         cfg["env"]["action_chunk"],
         cfg["env"]["action_dim"],
         c["heads"],
         c["widths"],
     )
+
+
+def critic_state_dim(cfg, extra_state_dim=0):
+    return cfg["offline"]["rl_token"]["dim"] + extra_state_dim
+
+
+def proprio_enabled(cfg):
+    """Critic-side proprioception only; the policy conditioning stays stateless."""
+    return bool(cfg["offline"]["critic"].get("proprio", False))
+
+
+def proprio_stats(buffer):
+    rows = torch.stack(
+        [
+            torch.as_tensor(buffer.observation(e, i)[PROPRIO_KEY], dtype=torch.float32)
+            for e, i in buffer.states
+        ]
+    )
+    if not torch.isfinite(rows).all():
+        raise ValueError("Non-finite proprioception in buffer")
+    return dict(mean=rows.mean(0), std=rows.std(0).clamp_min(1e-3))
+
+
+def proprio_features(buffer, pairs, stats):
+    rows = torch.stack(
+        [
+            torch.as_tensor(buffer.observation(e, i)[PROPRIO_KEY], dtype=torch.float32)
+            for e, i in pairs
+        ]
+    )
+    return (rows - stats["mean"]) / stats["std"]

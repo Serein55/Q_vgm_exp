@@ -22,7 +22,7 @@ def main():
 
     from qvgm.algorithms.q_guidance import improve_actions
     from qvgm.data.replay_buffer import ReplayBuffer
-    from qvgm.training import buffer_signature, make_critic
+    from qvgm.training import buffer_signature, make_critic, proprio_features
 
     torch.set_num_threads(cfg["runtime"]["cpu_threads"])
     torch.manual_seed(cfg["runtime"]["seed"])
@@ -36,7 +36,9 @@ def main():
     signature = buffer_signature(buffer)
     if any(c["buffer_signature"] != signature for c in (features, checkpoint)):
         raise ValueError("Buffer provenance mismatch")
-    critic = make_critic(cfg).to(cfg["runtime"]["device"]).eval().requires_grad_(False)
+    stats = checkpoint.get("proprio_stats")
+    extra = 0 if stats is None else int(stats["mean"].numel())
+    critic = make_critic(cfg, extra).to(cfg["runtime"]["device"]).eval().requires_grad_(False)
     critic.load_state_dict(checkpoint["critic"])
     selected = torch.randperm(len(buffer.transitions))[:512].tolist()
     samples = [buffer.transitions[i] for i in selected]
@@ -44,6 +46,8 @@ def main():
     for offset in range(0, len(samples), 32):
         batch = samples[offset : offset + 32]
         z = torch.stack([features["z"][e][i] for e, i in batch]).to(cfg["runtime"]["device"])
+        if stats is not None:
+            z = torch.cat([z, proprio_features(buffer, batch, stats).to(z.device)], -1)
         actions = torch.stack(
             [buffer.episodes[e]["transitions"][i]["action"] for e, i in batch]
         ).to(z.device)

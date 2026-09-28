@@ -1,0 +1,6 @@
+# Ablation arm: both critic-side changes (mean expectile target + proprioception).
+extends: ../libero_spatial.yaml
+offline:
+  critic:
+    value_target: mean
+    proprio: true

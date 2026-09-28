@@ -1,0 +1,5 @@
+# Ablation arm: expectile target uses the head MEAN instead of the target-head min.
+extends: ../libero_spatial.yaml
+offline:
+  critic:
+    value_target: mean

@@ -46,3 +46,21 @@ class Value(nn.Module):
 
     def forward(self, z):
         return self.net(z).squeeze(-1)
+
+
+class ConstantDirectionQ(nn.Module):
+    """q(z, a) = a . m: the action gradient is identical at every state.
+
+    Control for Q-VGM guidance. If distilling this reproduces the collapse caused by the
+    learned critic, the state-conditional part of Q carries none of the effect.
+    """
+
+    def __init__(self, direction, horizon, action_dim):
+        super().__init__()
+        flat = torch.as_tensor(direction, dtype=torch.float32).flatten()
+        if flat.numel() != horizon * action_dim:
+            raise ValueError("direction must have horizon * action_dim entries")
+        self.register_buffer("direction", flat.reshape(horizon, action_dim))
+
+    def mean(self, z, action):
+        return (action * self.direction).flatten(1).sum(-1)
