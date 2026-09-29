@@ -1,18 +1,70 @@
-# Q-VGM idea 实验
+# Q-VGM v5：最小 offline 复现
 
-当前结论：原论文 offline 复现失败，且失败已定位到机制层——引导量几乎与状态无关，等价于常数动作偏置（2026-09-28，见下）。检索策略独立起点确认未通过门槛（389 vs 375）。特权状态参数化 critic 诊断已完成：geometry/full_state 不优于视觉 mean-pool（OOF 1143–1160 vs 1193/2048），瓶颈判定为标签/候选设计而非视觉表征；离散九候选线已到天花板。
+本仓库只保留 v5 offline 主线及必要测试。v2、检索/控制器改进分支、消融产物、旧文档和运行日志已删除；外部 RLinf 环境与 few-shot SFT 权重未改动。许可证文件保留。本文是唯一说明文档。
 
-**few-shot 基线补测已完成**（2026-09-28 00:02，`scripts/eval_sft_baseline.sh`，逐回合 `episodes.jsonl` 在 `artifacts/eval/sftbase_*/`）：同一批 SFT 权重在 Q-VGM harness 内 **发布条件 376/500、v5 字面条件 26/500**，RLinf harness 为 400/500。两个后果：(1) 52/500 的同条件对照是 26/500；历史 α=0 组（41/50=82%）经核查 500 步 loss 全为 0、actor 从未更新，**那 82% 就是 SFT 本身，不是训练过的对照**，所以旧链条"条件不匹配→训练修复到 82%→引导砸到 10%"不成立，正确表述是「同条件 SFT → 加引导蒸馏 → 10–30%」；(2) **基线是 harness 依赖的**（376 vs 400，差 24 回合集中在 t5/t8），RLinf harness 的 400/500 只在该 harness 内成立，跨 harness 比较一律无效。
+## 已完成的工作与结论
 
-**offline 复现的因果定位已完成**（2026-09-28 07:15，`idea改进实验.md` 末节、`复现过程.md` 阶段 3/4）：数据、AE、critic、actor 全部重建后，四个 critic 臂（论文默认 min 聚合、mean 聚合、+proprio、两者）的**配对反事实 A/B 全部未通过门槛**（Δ≤0、p≥0.087、`corr(q_gain,Δ)`≈0），且实际引导位移的 **91–94% 方差由一个与状态无关的方向解释**。据此构造的常数偏置对照 `q(z,a)=a·m` 在 500 回合上与真 critic 不可区分（141/500 对 148/500，McNemar p=0.49），两者都相对 SFT 基线 376/500 崩溃（p≈1e-56）。**结论：状态条件 Q 对崩溃没有可测贡献，本次复现中的"价值引导"等价于注入固定旋转偏置并被 500 步 velocity matching 积分成腕部姿态漂移。** 因此继续改 critic 聚合、加 proprio/特权状态、调 α/LR 都无着力点；要让引导存在，必须先让 ∇_A Q 随状态变化，而当前标签（chunk 级稀疏成功、150 条轨迹、normalized 旋转维 std 仅 0.04–0.07）与九候选线的"标签噪声与信号同阶"是同一个瓶颈。当前无后台实验在跑，8 卡显存归零。
+- 实现 few-shot π0.5 rollout、冻结前缀表征的 RLT 自编码器、IQL critic、Q 梯度引导与 velocity-matching actor，以及 LIBERO 评估。
+- v5 发布权重兼容配置：采集150条轨迹，RLT训练10000步，critic训练6000步，actor训练500步。主线数据、权重、特征缓存保留在 `artifacts/spatial_v5_h10/`。
+- 同一 Q-VGM 评估 harness 下，发布输入条件 SFT 为376/500；v5字面输入条件为26/500。用户提供的另一 RLinf harness 成绩为400/500，不能跨 harness 直接比较。
+- 默认 min、mean、加 proprio 及二者组合的配对引导诊断均未确认提升。默认 min 的464对结果：控制82.11%、引导81.47%，14胜17负，p≈0.72。
+- 此前常数动作偏置对照为141/500，真critic引导actor为148/500，二者配对检验p≈0.49；均明显低于同harness的SFT 376/500。引导位移约91–94%的方差由全局方向解释，支持“引导主要表现为固定偏置”的诊断，但不证明论文idea一般无效。
+- 曾尝试检索、特权状态、监督排序等改进，没有确认稳定收益。另行尝试的v2已按要求全部删除；其代码、数据、权重、结果文件均不属于当前pipeline。
+- 尚未实现持续采样、更新buffer、交替更新critic/actor的online RL。当前保留的是完成过、但未达到论文效果的offline实现，不是官方实现。
 
-**最新机制发现**（`idea改进实验.md` 末节）：t9 的失败不是感知/语言/够不到，而是**最后落点精度**——真值追踪显示取碗与搬运成功（0.5 m），成功回合落点离盘心 4–8 mm 且盘子不动，t9 失败回合偏 32–62 mm 并把盘子撞开 50–120 mm。场景含两个黑碗（柜顶为目标、炉面为干扰物），录像中"柜顶还有碗"不是抓错碗。该机制对口方向 4（部署状态上的 DAgger 式数据聚合），不对口 1/2/3/9/10。
+## 数学与数据 pipeline
 
-- [主要实验结果与当前进度](idea改进实验.md)
-- [数学原理、论文差异](论文算法核对.md)
-- [数据流与文件用法](数据PIPELINE.md)
-- [完整复现流水与时间线](复现过程.md)
+```text
+外部 few-shot SFT + LIBERO
+  → 固定探索 rollout：150 episodes
+  → buffer：前缀tokens、观测、动作块、奖励、终止信息
+  → RLT自编码器：重建冻结前缀表征，缓存 z
+  → IQL：Q回归 r + γ V(s′)，V做expectile回归
+  → 动作梯度上升 A⁺ = A + η ∇A Q(z,A)
+  → 用局部velocity matching把动作修正蒸馏到actor
+  → 同一harness评估SFT与actor的success_once
+```
 
-2026-09-26 按用户要求删除失败实验的权重、数据、日志及一次性脚本，历史只保留文档结论。外部 RLinf 权重、环境及其他项目未改动。本机另有不入库的大体积产物与归档目录，见 `.gitignore`（`artifacts/`、`archive/`）。
+RLT采用带mask的表征重建损失；critic为ensemble，V默认以min聚合为expectile目标（τ=0.8）；actor在后段flow步骤使用Q引导目标。细节以 `qvgm/algorithms/` 和训练脚本为准。探索温度2.0、flow noise 0.08及部分offline预算是工程选取，不能视为作者公开的完整超参。
 
-运行入口：`bash Q_vgm/run.sh <脚本名> [参数]`。Q-VGM 主配置 `configs/libero_spatial.yaml`（v5 字面条件见 `configs/libero_spatial_paper.yaml`，critic 消融臂见 `configs/arms/`）；失败诊断配置 `configs/diag/`；真值追踪 `scripts/diag_grasp_trace.py`。offline 线可整体重跑：`scripts/collect_buffer_h10.sh`（5 卡并行采 150 episodes，约 10 分钟）→ `train_rl_token`（约 100 分钟）→ `scripts/critic_arms.sh`（四臂 critic + 梯度诊断）→ `scripts/counterfactual_arms.sh`（配对环境 A/B + `counterfactual_report.py` 汇总）→ `scripts/actor_eval.sh <min|mean|prop|meanprop|bias>`（500 步 actor + 500 回合评估，切分与基线一致）；`scripts/guidance_direction.py` 测引导位移的全局方向占比，`--bias-critic` 用 `ConstantDirectionQ` 做常数偏置对照。保留的标签可直接用于后续改进；已完成的无效模型已删除，不必重复采集。
+主配置保留发布SFT的H10、非离散state输入，执行前5步×7维动作；10次去噪，环境上限220步。`libero_spatial_paper.yaml`另提供H5、离散state的字面配置，仅供明确对照；不可与主线混用数据或直接比较基线。
+
+## 文件与路径
+
+| 路径 | 用途 |
+|---|---|
+| `configs/libero_spatial.yaml` | Python、SFT、normalization、tokenizer、LIBERO等外部路径及基础设置 |
+| `configs/libero_spatial_checkpoint.yaml` | v5算法采用发布权重输入约定的训练配置 |
+| `configs/libero_spatial_paper.yaml` | 论文输入约定的字面对照配置 |
+| `qvgm/models/` | π0.5适配、RLT、critic |
+| `qvgm/algorithms/` | IQL、动作引导、velocity-matching loss |
+| `qvgm/data/`、`qvgm/envs/` | replay和LIBERO接口 |
+| `qvgm/training.py`、`qvgm/config.py` | 训练、公用配置与产物一致性检查 |
+| `scripts/` | 预检、采集、RLT/critic/actor训练和SFT/actor评估，共7个入口 |
+| `tests/` | 保留算法和输入约定测试 |
+| `artifacts/spatial_v5_h10/buffer/` | 150条轨迹及采集配置/flow检查；不保留采集日志 |
+| `artifacts/spatial_v5_h10/rl_token_full.pt` | RLT权重及训练状态 |
+| `artifacts/spatial_v5_h10/features_full.pt` | 冻结z缓存及buffer签名 |
+| `artifacts/spatial_v5_h10/critic_full.pt` | critic权重 |
+| `artifacts/spatial_v5_h10/actor_full.pt` | actor权重 |
+
+产物约25GiB，主要是数据与模型，不是日志。特征与模型记录buffer签名；不要重采后直接拼接旧缓存。路径集中在YAML，默认外部Python为 `../RLinf/.venv-openpi-robotwin/bin/python`。运行入口默认GPU2，可用 `CUDA_VISIBLE_DEVICES` 覆盖。
+
+## 使用
+
+在仓库根目录执行。已有主线产物可直接评估；重新训练请使用新run名，避免覆盖保留结果：
+
+```bash
+bash run.sh preflight --config configs/libero_spatial_checkpoint.yaml
+
+# 以下为重跑命令，不是当前正在运行的任务。
+bash run.sh collect_rollouts --config configs/libero_spatial.yaml --run v5_new --check-flow
+bash run.sh train_rl_token --config configs/libero_spatial_checkpoint.yaml --run v5_new --tag full
+bash run.sh train_critic --config configs/libero_spatial_checkpoint.yaml --run v5_new --tag full
+bash run.sh train_offline_qvgm --config configs/libero_spatial_checkpoint.yaml --run v5_new --tag full --steps 500
+
+bash run.sh eval_sft --config configs/libero_spatial_checkpoint.yaml --name v5_sft
+bash run.sh eval_qvgm --config configs/libero_spatial_checkpoint.yaml --actor-checkpoint artifacts/spatial_v5_h10/actor_full.pt --name v5_actor
+```
+
+`collect_rollouts --task-ids`支持任务子集；评估支持`--episodes-per-task`。训练续跑须显式`--resume`并保持配置、数据一致。将来主动运行会生成新日志，此次清理删除的是既有日志，不移除训练所需的运行记录能力。

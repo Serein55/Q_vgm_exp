@@ -138,15 +138,6 @@ def main():
         config=cfg,
     )
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    if args.actor_checkpoint:
-        process_doc = Path(__file__).resolve().parents[1] / "复现过程.md"
-        with process_doc.open("a") as f:
-            f.write(
-                f"\n- Q-VGM 评估 `{args.name}` 完成：success_once="
-                f"{summary['successes']}/{summary['episodes']}="
-                f"{summary['success_rate']:.1%}；结果 `{out / 'summary.json'}`。"
-                "与历史基线比较时仍需核对评估配置。\n"
-            )
     print(json.dumps({k: v for k, v in summary.items() if k != "config"}), flush=True)
 
 
